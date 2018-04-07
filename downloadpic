@@ -1,0 +1,183 @@
+# @Time    : 4/3/18 4:16 PM
+# @Author  : caojianping
+# @File    : downloadpic.py
+
+import codecs,urllib3,os,io,stackless
+from tkinter import *
+from PIL import Image,ImageTk
+
+
+class DownloadPicture(Frame):
+
+    def __init__(self,localdir,readurl,master = None):
+        Frame.__init__(self,master)
+        self.root = master
+        self.readurl =readurl
+        self.localdir=localdir
+        self.varname = IntVar()
+        self.content = None
+        self.init_window()
+        self.pig_width=490
+        self.pig_height=501
+
+    def init_window(self):
+        self.content = readata(self.readurl)
+        self.root.title = '图片助手 Ver3.0'
+
+        # menu
+        menu = Menu(self.root)
+        self.root.config(menu=menu)
+        file = Menu(menu)
+        file.add_command(label = 'Exit',command = self.client_exit)
+        menu.add_cascade(label = 'File',menu=file)
+
+        # local radio
+        self.local_radio = Radiobutton(self.root,variable=self.varname,value=1,text='本地图片')
+
+        # remote radio
+        self.remote_radio = Radiobutton(self.root,variable=self.varname,value=2,text='远程图片')
+
+        # input text entry
+        self.inputext = Entry(self.root)
+
+        # version number label
+        self.dplable = Label(self.root,text='版本号:',fg='red')
+
+        # version number text
+        # self.vertext = Text(self.root,height=1,width=30,state='disabled')
+        self.vertext = Text(self.root,height=1,width=30,bg='gray')
+        self.vertext.insert(INSERT,self.content.get("version"))
+        self.vertext.pack()
+
+        # comment label
+        self.comment = Label(self.root,text='说明:远程图片读取成功会自动保存到本地"D:\pic"目录下面.',fg = 'red',bg = 'white')
+
+        # read picture button
+        self.readbutton=Button(self.root,text='读取图片',command=self.readpic)
+
+        # update picture button
+        self.updatebutton=Button(self.root,text='更新图片',command=self.batchupdate)
+
+
+    def client_exit(self):
+        exit()
+
+    def show_img(self,pic,num,local):
+        load = None
+        if local:
+            if os.path.isfile(pic):
+                load = Image.open(pic)
+        else:
+            http = urllib3.PoolManager()
+            image_bytes = http.request('get',pic)
+            data_stream = io.BytesIO(image_bytes.data)
+            try:
+                load = Image.open(data_stream)
+                if not os.path.isdir(localdir):
+                    os.makedirs(localdir)
+                localpic = localdir+"{}.jpg".format(num)
+                if not os.path.isfile(localpic):
+                    image_bytes = http.request('get',pic)
+                    with open(localpic,'wb+') as image:
+                        image.write(image_bytes.data)
+                    # data_stream.write(localpic)
+            except OSError as err:
+                print("pic doesn't exist:{} ,\r\n err: {}".format(pic,err))
+                load = None
+        if load:
+            w,h = load.size
+            pil_image_resized = resize(w,h,self.pig_width,self.pig_height,load)
+            render = ImageTk.PhotoImage(pil_image_resized)
+            img = Label(self.root,image=render,width=self.pig_width,height=self.pig_height)
+            img.image = render
+            img.place(x=10,y=10)
+
+    def layout(self):
+        self.local_radio.place(x=10,y=521)
+        self.remote_radio.place(x=90,y=521)
+        self.inputext.place(x=190,y=521)
+        self.dplable.place(x=10,y=561)
+        self.readbutton.place(x=400,y=521)
+        self.updatebutton.place(x=400,y=561)
+        self.comment.place(x=10,y=610)
+        self.vertext.place(x=70,y=561)
+
+    def readpic(self):
+        # radio: 1.local 2.remote
+        num = self.inputext.get()
+        radio = self.varname.get()
+        if num:
+            if radio == 1:
+                pic = self.localdir+"{}.jpg".format(num)
+                print("local pic:",pic)
+                if os.path.isfile(pic):
+                    print("read local pic:",pic)
+                    self.show_img(pic,num,local=True)
+                else:
+                    print("pic does not exist!")
+            elif radio == 2:
+                pic ="http://127.0.0.1:11000/www/GoodsImages/"+ num[:-3]+"/" + num + "/ZTImages/fbzt_s.jpg"
+                self.show_img(pic,num,local=False)
+            else:
+                print("pic doesn't exsit!")
+
+    def batchupdate(self):
+        print('batch update picture')
+        nalist = self.content.get('nalist','')
+        for num in nalist:
+            n = num.get('number')
+            if n:
+                stackless.tasklet(self.downpic)(n)
+        stackless.run()
+
+    def downpic(self,num):
+        url= "http://127.0.0.1:11000/www/GoodsImages/"+num[:-3]+"/"+num+"/ZTImages/fbzt_s.jpg"
+        http = urllib3.PoolManager()
+        image = http.request('get',url)
+        # localpic = "/tmp/318150503S59.jpg"
+        localpic = self.localdir+"{}.jpg".format(num)
+        with open(localpic,'wb+') as f:
+            f.write(image.data)
+        print("save as:{}".format(localpic))
+
+def resize(w,h,w_box,h_box,pil_image):
+    f1 = 1.0*w_box/w
+    f2 = 1.0*h_box/h
+    factor = min([f1,f2])
+    width = int(w*factor)
+    height = int(h*factor)
+    return pil_image.resize((width,height),Image.ANTIALIAS)
+
+def readata(url):
+    result = {}
+    reader = codecs.getreader('utf-8')
+    http = urllib3.PoolManager()
+    r = http.request('GET', url)
+    reader(r)
+    data =  str(r.data,encoding = "gb2312")
+    content = data.split('\r\n')
+    version = content[0]
+    result['version'] = version.split('=')[1]
+    nalist = []
+    for num in content[1:]:
+        if len(num.split('\t')) == 2:
+            number = num.split('\t')[0]
+            name = num.split('\t')[1]
+            nalist.append({
+                "number":number,
+                "name":name
+            })
+    result['nalist']=nalist
+    return result
+
+def main():
+    root = Tk()
+    root.geometry('510x655')
+    app = DownloadPicture(localdir,readurl,root)
+    app.layout()
+    root.mainloop()
+
+if __name__ == '__main__':
+    localdir = '/tmp/'
+    readurl = 'http://127.0.0.1:9800/vm-lst.txt'
+    main()
